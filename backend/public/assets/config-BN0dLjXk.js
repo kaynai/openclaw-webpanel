@@ -1,0 +1,1 @@
+import{a as t}from"./_plugin-vue_export-helper-UIjDl3KO.js";const a=t.create({baseURL:"/api",timeout:3e4,headers:{"Content-Type":"application/json"}});async function o(){return(await a.get("/config")).data}async function i(n){return(await a.post("/config",n)).data}async function p(n){return(await a.post("/openclaw/install",n)).data}export{o as g,p as i,i as s};

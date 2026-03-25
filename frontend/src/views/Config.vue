@@ -33,26 +33,66 @@
           </div>
           <el-table :data="models" border>
             <el-table-column prop="name" label="模型名称" width="250" />
-            <el-table-column prop="provider" label="提供商" width="150" />
+            <el-table-column prop="provider" label="提供商" width="150">
+              <template #default="scope">
+                <el-select v-model="scope.row.provider" placeholder="选择提供商" @change="onProviderChange(scope.row)">
+                  <el-option label="OpenAI" value="openai" />
+                  <el-option label="Anthropic" value="anthropic" />
+                  <el-option label="StepFun" value="stepfun" />
+                  <el-option label="Azure OpenAI" value="azure" />
+                  <el-option label="Google" value="google" />
+                  <el-option label="自定义" value="custom" />
+                </el-select>
+              </template>
+            </el-table-column>
             <el-table-column prop="apiKey" label="API Key">
               <template #default="scope">
                 <el-input v-model="scope.row.apiKey" type="password" show-password />
               </template>
             </el-table-column>
-            <el-table-column prop="baseUrl" label="Base URL" />
+            <el-table-column prop="baseUrl" label="Base URL">
+              <template #default="scope">
+                <el-input v-model="scope.row.baseUrl" placeholder="https://api.openai.com/v1" />
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="120">
               <template #default="scope">
                 <el-button type="danger" size="small" @click="removeModel(scope.$index)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
+          <div style="margin-top: 10px; color: #666; font-size: 12px;">
+            <p><strong>提供商预设：</strong></p>
+            <ul>
+              <li>OpenAI: https://api.openai.com/v1</li>
+              <li>Anthropic: https://api.anthropic.com</li>
+              <li>StepFun: https://api.stepfun.com</li>
+              <li>Azure OpenAI: https://YOUR_RESOURCE_NAME.openai.azure.com</li>
+              <li>自定义: 自行填写 API 地址</li>
+            </ul>
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="频道设置" name="channels">
+          <div style="margin-bottom: 20px;">
+            <el-button type="primary" @click="addChannel">添加频道</el-button>
+          </div>
           <el-table :data="channels" border>
             <el-table-column prop="type" label="类型" width="150">
               <template #default="scope">
-                <el-tag>{{ scope.row.type }}</el-tag>
+                <el-select v-model="scope.row.type" placeholder="选择类型">
+                  <el-option label="Telegram" value="telegram" />
+                  <el-option label="Discord" value="discord" />
+                  <el-option label="Slack" value="slack" />
+                  <el-option label="WhatsApp" value="whatsapp" />
+                  <el-option label="Signal" value="signal" />
+                  <el-option label="IRC" value="irc" />
+                  <el-option label="Google Chat" value="googlechat" />
+                  <el-option label="LINE" value="line" />
+                  <el-option label="WeChat" value="wechat" />
+                  <el-option label="KakaoTalk" value="kakaotalk" />
+                  <el-option label="自定义" value="custom" />
+                </el-select>
               </template>
             </el-table-column>
             <el-table-column prop="enabled" label="启用" width="100">
@@ -63,10 +103,19 @@
             <el-table-column prop="config" label="配置">
               <template #default="scope">
                 <el-form :model="scope.row.config" size="small">
-                  <div v-for="(value, key) in scope.row.config" :key="key">
-                    <el-input v-model="scope.row.config[key]" :placeholder="key" style="margin-bottom: 5px;" />
+                  <div v-for="(value, key) in scope.row.config" :key="key" style="margin-bottom: 5px;">
+                    <el-input
+                      v-model="scope.row.config[key]"
+                      :placeholder="getChannelConfigPlaceholder(scope.row.type, key)"
+                      style="width: 100%;"
+                    />
                   </div>
                 </el-form>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="scope">
+                <el-button type="danger" size="small" @click="removeChannel(scope.$index)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -111,7 +160,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConfigStore } from '@/stores/config'
 
 const configStore = useConfigStore()
-const { config, updateConfig, loadConfig } = configStore
+const { config, updateConfig, loadConfig } = configStore()
 
 const activeTab = ref('gateway')
 const saving = ref(false)
@@ -124,10 +173,7 @@ const gatewayConfig = ref({
 })
 
 const models = ref([])
-const channels = ref([
-  { type: 'Telegram', enabled: false, config: { token: '', chatId: '' } },
-  { type: 'Discord', enabled: false, config: { token: '', channelId: '' } }
-])
+const channels = ref([])
 const systemConfig = ref({
   openclawPath: '/usr/local/bin/openclaw',
   maxSessions: 10,
@@ -136,6 +182,21 @@ const systemConfig = ref({
   backupPath: './backups',
   logLevel: 'info'
 })
+
+// 频道配置模板
+const channelConfigTemplates = {
+  telegram: { token: '', chatId: '' },
+  discord: { token: '', channelId: '' },
+  slack: { token: '', channelId: '' },
+  whatsapp: { token: '', phoneId: '' },
+  signal: { phoneNumber: '', pin: '' },
+  irc: { server: '', port: '6667', nick: '', channels: '' },
+  googlechat: { webhookUrl: '' },
+  line: { accessToken: '', userId: '' },
+  wechat: { token: '', encodingAESKey: '' },
+  kakaotalk: { token: '', channelId: '' },
+  custom: {}
+}
 
 onMounted(() => {
   loadConfigData()
@@ -158,6 +219,13 @@ async function loadConfigData() {
     logLevel: 'info'
   }
   models.value = c.models || []
+
+  // 加载频道配置
+  if (c.channels && Array.isArray(c.channels)) {
+    channels.value = c.channels
+  } else {
+    channels.value = []
+  }
 }
 
 function addModel() {
@@ -171,6 +239,47 @@ function addModel() {
 
 function removeModel(index) {
   models.value.splice(index, 1)
+}
+
+function onProviderChange(model) {
+  const providerUrls = {
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com',
+    stepfun: 'https://api.stepfun.com',
+    azure: '',
+    google: 'https://generativelanguage.googleapis.com',
+    custom: ''
+  }
+  model.baseUrl = providerUrls[model.provider] || ''
+}
+
+function addChannel() {
+  channels.value.push({
+    type: 'telegram',
+    enabled: true,
+    config: { ...channelConfigTemplates.telegram }
+  })
+}
+
+function removeChannel(index) {
+  channels.value.splice(index, 1)
+}
+
+function getChannelConfigPlaceholder(type, key) {
+  const placeholders = {
+    telegram: { token: 'Bot Token', chatId: 'Chat ID' },
+    discord: { token: 'Bot Token', channelId: 'Channel ID' },
+    slack: { token: 'Bot Token', channelId: 'Channel ID' },
+    whatsapp: { token: 'Phone ID Token', phoneId: 'Phone ID' },
+    signal: { phoneNumber: 'Phone Number', pin: 'PIN (optional)' },
+    irc: { server: 'IRC Server', port: 'Port', nick: 'Nickname', channels: 'Channels (comma-separated)' },
+    googlechat: { webhookUrl: 'Webhook URL' },
+    line: { accessToken: 'Channel Access Token', userId: 'User ID' },
+    wechat: { token: 'Token', encodingAESKey: 'Encoding AES Key' },
+    kakaotalk: { token: 'Bot Token', channelId: 'Channel ID' },
+    custom: {}
+  }
+  return placeholders[type]?.[key] || key
 }
 
 async function testConnection() {
@@ -196,6 +305,7 @@ async function saveAll() {
       gatewayUrl: gatewayConfig.value.gatewayUrl,
       adminToken: gatewayConfig.value.adminToken,
       models: models.value,
+      channels: channels.value,
       ...systemConfig.value
     })
     ElMessage.success('配置已保存')
@@ -207,7 +317,6 @@ async function saveAll() {
 }
 
 function browsePath() {
-  // 需要后端支持文件浏览器
   ElMessage.info('请在输入框中手动输入路径')
 }
 </script>

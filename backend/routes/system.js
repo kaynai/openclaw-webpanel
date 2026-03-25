@@ -1,28 +1,23 @@
 import express from 'express'
-import db from '../db.js'
-import { spawn } from 'child_process'
-import { promisify } from 'node:util'
-import { exec } from 'node:child_process'
 
 const router = express.Router()
 
 // 获取系统日志
 router.get('/logs', async (req, res) => {
   try {
+    const database = await getDb()
+    const logs = database.data.systemLogs || []
     const { limit = 100, level } = req.query
-    let sql = 'SELECT * FROM system_logs'
-    const params = []
 
+    let filtered = logs
     if (level && level !== 'all') {
-      sql += ' WHERE level = ?'
-      params.push(level)
+      filtered = filtered.filter(l => l.level === level)
     }
 
-    sql += ' ORDER BY timestamp DESC LIMIT ?'
-    params.push(parseInt(limit))
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 
-    const logs = await db.all(sql, params)
-    res.json({ logs })
+    const result = limit ? filtered.slice(0, parseInt(limit)) : filtered
+    res.json({ logs: result })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
@@ -32,10 +27,16 @@ router.get('/logs', async (req, res) => {
 router.post('/logs', async (req, res) => {
   try {
     const { level, source, message } = req.body
-    await db.run(
-      'INSERT INTO system_logs (level, source, message) VALUES (?, ?, ?)',
-      [level || 'info', source || 'panel', message]
-    )
+    const database = await getDb()
+    const log = {
+      id: database.data.systemLogs?.length + 1 || 1,
+      level: level || 'info',
+      source: source || 'panel',
+      message,
+      timestamp: new Date().toISOString()
+    }
+    database.data.systemLogs = [...(database.data.systemLogs || []), log]
+    await database.write()
     res.json({ success: true })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -53,6 +54,7 @@ router.get('/info', async (req, res) => {
 })
 
 async function getSystemInfo() {
+  const { exec } = require('child_process')
   return new Promise((resolve) => {
     exec('uname -a && uptime && free -h && df -h', (err, stdout) => {
       if (err) resolve({ error: err.message })

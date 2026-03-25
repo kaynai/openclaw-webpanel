@@ -2,7 +2,7 @@
   <el-container class="layout">
     <el-aside :width="isCollapse ? '64px' : '200px'">
       <div class="logo">
-        <img v-if="!isCollapse" src="@/assets/logo.png" alt="OpenClaw" />
+        <img v-if="!isCollapse" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj4KICA8Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0NSIgZmlsbD0iIzQwOWVmcCIvPgogIDx0ZXh0IHg9IjUwIiB5PSI2NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjQwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk9DPC90ZXh0Pgo8L3N2Zz4=" alt="OpenClaw" />
         <span v-show="!isCollapse">OpenClaw 面板</span>
       </div>
       <el-menu

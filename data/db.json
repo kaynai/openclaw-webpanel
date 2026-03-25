@@ -1,0 +1,55 @@
+{
+  "config": {
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "adminToken": "new-token-123",
+    "autoStart": true,
+    "backupEnabled": true,
+    "backupPath": "./backups",
+    "models": [
+      {
+        "name": "gpt-4",
+        "provider": "openai",
+        "apiKey": "sk-new",
+        "baseUrl": "https://api.openai.com/v1"
+      },
+      {
+        "name": "claude-3",
+        "provider": "anthropic",
+        "apiKey": "sk-ant",
+        "baseUrl": "https://api.anthropic.com"
+      }
+    ],
+    "channels": [
+      {
+        "type": "discord",
+        "enabled": true,
+        "config": {
+          "token": "DISCORD_TOKEN",
+          "channelId": "123456"
+        }
+      },
+      {
+        "type": "slack",
+        "enabled": false,
+        "config": {
+          "token": "SLACK_TOKEN",
+          "channelId": "C123456"
+        }
+      }
+    ]
+  },
+  "stats": {
+    "overview": {
+      "totalTokens": 0,
+      "totalSessions": 0,
+      "activeSessions": 0,
+      "todayTokens": 0
+    },
+    "byModel": [],
+    "bySession": [],
+    "timeSeries": []
+  },
+  "sessions": [],
+  "plugins": [],
+  "systemLogs": []
+}

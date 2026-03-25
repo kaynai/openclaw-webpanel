@@ -1,94 +1,64 @@
-import sqlite3 from 'sqlite3'
-import { open } from 'sqlite'
+import { Low } from 'lowdb'
+import { JSONFile } from 'lowdb/node'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import fs from 'fs-extra'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 let dbInstance = null
 
-export default async function getDb() {
+export async function getDb() {
   if (dbInstance) return dbInstance
 
-  const dbPath = process.env.DB_PATH || join(__dirname, '..', 'data', 'panel.db')
-  dbInstance = await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  })
+  const dataDir = process.env.DATA_DIR || join(__dirname, '..', 'data')
+  const dbPath = join(dataDir, 'db.json')
 
-  // 初始化表结构
-  await dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS config (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      gateway_url TEXT NOT NULL,
-      admin_token TEXT NOT NULL,
-      openclaw_path TEXT DEFAULT '/usr/local/bin/openclaw',
-      auto_start BOOLEAN DEFAULT 1,
-      backup_enabled BOOLEAN DEFAULT 1,
-      backup_path TEXT DEFAULT './backups',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+  // 确保数据目录存在
+  await fs.ensureDir(dataDir)
 
-    CREATE TABLE IF NOT EXISTS stats (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date DATE NOT NULL,
-      model TEXT NOT NULL,
-      tokens INTEGER DEFAULT 0,
-      sessions INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(date, model)
-    );
+  // 初始化数据结构
+  const defaultData = {
+    config: {
+      gatewayUrl: 'ws://127.0.0.1:18789',
+      adminToken: '',
+      openclawPath: '/usr/local/bin/openclaw',
+      autoStart: true,
+      backupEnabled: true,
+      backupPath: './backups',
+      models: [],
+      channels: []
+    },
+    stats: {
+      overview: {
+        totalTokens: 0,
+        totalSessions: 0,
+        activeSessions: 0,
+        todayTokens: 0
+      },
+      byModel: [],
+      bySession: [],
+      timeSeries: []
+    },
+    sessions: [],
+    plugins: [],
+    systemLogs: []
+  }
 
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      model TEXT NOT NULL,
-      tokens INTEGER DEFAULT 0,
-      message_count INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'active',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+  // 如果文件不存在，创建初始文件
+  if (!await fs.pathExists(dbPath)) {
+    await fs.writeJson(dbPath, defaultData, { spaces: 2 })
+  }
 
-    CREATE TABLE IF NOT EXISTS plugins (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      version TEXT NOT NULL,
-      description TEXT,
-      author TEXT,
-      enabled BOOLEAN DEFAULT 1,
-      config TEXT DEFAULT '{}',
-      installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      files TEXT DEFAULT '[]'
-    );
+  const adapter = new JSONFile(dbPath)
+  dbInstance = new Low(adapter, defaultData)
+  await dbInstance.read()
 
-    CREATE TABLE IF NOT EXISTS system_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      level TEXT DEFAULT 'info',
-      source TEXT,
-      message TEXT NOT NULL,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS models (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      provider TEXT NOT NULL,
-      apiKey TEXT NOT NULL,
-      baseUrl TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `)
-
-  // 插入默认配置（如果不存在）
-  const configCount = await dbInstance.get('SELECT COUNT(*) as count FROM config')
-  if (configCount.count === 0) {
-    await dbInstance.run(
-      'INSERT INTO config (id, gateway_url, admin_token) VALUES (1, ?, ?)',
-      'ws://127.0.0.1:18789',
-      ''
-    )
+  // 如果数据为空，初始化默认值
+  if (!dbInstance.data) {
+    dbInstance.data = defaultData
+    await dbInstance.write()
   }
 
   return dbInstance

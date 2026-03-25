@@ -9,7 +9,9 @@ export const useConfigStore = defineStore('config', () => {
     openclawPath: '/usr/local/bin/openclaw',
     autoStart: true,
     backupEnabled: true,
-    backupPath: './backups'
+    backupPath: './backups',
+    models: [],
+    channels: []
   })
 
   const isLoading = ref(false)

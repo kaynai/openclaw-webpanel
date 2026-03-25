@@ -1,28 +1,25 @@
 import express from 'express'
-import db from '../db.js'
+import { getDb } from '../db.js'
 
 const router = express.Router()
 
 // 获取会话列表
 router.get('/', async (req, res) => {
   try {
+    const database = await getDb()
+    const sessions = database.data.sessions || []
     const { limit = 50, status } = req.query
-    let sql = 'SELECT * FROM sessions'
-    const params = []
 
+    let filtered = sessions
     if (status) {
-      sql += ' WHERE status = ?'
-      params.push(status)
+      filtered = filtered.filter(s => s.status === status)
     }
 
-    sql += ' ORDER BY updated_at DESC'
-    if (limit) {
-      sql += ' LIMIT ?'
-      params.push(parseInt(limit))
-    }
+    filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
-    const sessions = await db.all(sql, params)
-    res.json({ sessions })
+    const result = limit ? filtered.slice(0, parseInt(limit)) : filtered
+
+    res.json({ sessions: result })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
@@ -31,7 +28,10 @@ router.get('/', async (req, res) => {
 // 获取单个会话详情
 router.get('/:id', async (req, res) => {
   try {
-    const session = await db.get('SELECT * FROM sessions WHERE id = ?', [req.params.id])
+    const database = await getDb()
+    const sessions = database.data.sessions || []
+    const session = sessions.find(s => s.id === req.params.id)
+
     if (!session) {
       return res.status(404).json({ error: 'Session not found' })
     }
@@ -49,10 +49,18 @@ router.get('/:id', async (req, res) => {
 // 结束会话
 router.post('/:id/end', async (req, res) => {
   try {
-    await db.run(
-      'UPDATE sessions SET status = "ended", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [req.params.id]
-    )
+    const database = await getDb()
+    const sessions = database.data.sessions || []
+    const index = sessions.findIndex(s => s.id === req.params.id)
+
+    if (index === -1) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+
+    sessions[index].status = 'ended'
+    sessions[index].updatedAt = new Date().toISOString()
+
+    await database.write()
     res.json({ success: true })
   } catch (error) {
     res.status(500).json({ error: error.message })

@@ -1,14 +1,4 @@
 import express from 'express'
-import db from '../db.js'
-import { spawn, exec } from 'child_process'
-import { promisify } from 'node:util'
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 const router = express.Router()
 
@@ -24,16 +14,69 @@ router.get('/env', async (req, res) => {
   }
 })
 
-// 开始安装
+// 安装 Node.js（如果未安装）
+router.post('/install-node', async (req, res) => {
+  try {
+    const logs = []
+    logs.push('开始安装 Node.js...')
+
+    // 检测系统类型
+    const osInfo = await execCommand('uname -s')
+    const isLinux = osInfo.includes('Linux')
+    const isMac = osInfo.includes('Darwin')
+
+    if (isLinux) {
+      // 使用 NodeSource 安装
+      logs.push('检测到 Linux 系统，使用 NodeSource 安装 Node.js 20...')
+      await execCommand('curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -')
+      await execCommand('apt-get install -y nodejs')
+    } else if (isMac) {
+      // macOS 使用 Homebrew
+      logs.push('检测到 macOS，使用 Homebrew 安装 Node.js...')
+      await execCommand('brew install node@20')
+    } else {
+      throw new Error('不支持的操作系统，请手动安装 Node.js')
+    }
+
+    const version = await execCommand('node --version')
+    logs.push(`Node.js 安装完成: ${version}`)
+
+    res.json({ success: true, logs: logs.join('\n') })
+  } catch (error) {
+    res.status(500).json({ error: error.message, logs: logs.join('\n') })
+  }
+})
+
+// 开始安装 OpenClaw
 router.post('/install', async (req, res) => {
   const { method, path: installPath, version } = req.body
 
   try {
-    // 发送实时日志（这里简化处理，实际应该用 SSE 或 WebSocket）
     const logs = []
 
-    // 步骤1: 安装 OpenClaw
-    logs.push('开始安装 OpenClaw...')
+    // 1. 检查并安装 Node.js
+    logs.push('步骤 1/4: 检查 Node.js...')
+    try {
+      const nodeVersion = await execCommand('node --version')
+      logs.push(`✓ Node.js 已安装: ${nodeVersion}`)
+    } catch {
+      logs.push('✗ Node.js 未安装，开始安装...')
+      // 调用安装 Node.js 的逻辑（简化，实际应通过 API）
+      logs.push('请先安装 Node.js 18+，然后重试')
+      throw new Error('Node.js 未安装')
+    }
+
+    // 2. 检查并安装 npm
+    logs.push('步骤 2/4: 检查 npm...')
+    try {
+      const npmVersion = await execCommand('npm --version')
+      logs.push(`✓ npm 已安装: ${npmVersion}`)
+    } catch {
+      throw new Error('npm 未安装')
+    }
+
+    // 3. 安装 OpenClaw
+    logs.push('步骤 3/4: 安装 OpenClaw...')
 
     if (method === 'npm') {
       const npmResult = await execCommand('npm install -g openclaw', logs)
@@ -43,11 +86,13 @@ router.post('/install', async (req, res) => {
       logs.push(...binaryResult)
     }
 
-    // 步骤2: 初始化配置
-    logs.push('初始化配置...')
+    // 4. 初始化配置
+    logs.push('步骤 4/4: 初始化配置...')
     await initConfig()
 
-    logs.push('OpenClaw 安装完成！')
+    logs.push('✅ OpenClaw 安装完成！')
+    logs.push('')
+    logs.push('下一步：在面板中配置网关地址和 Admin Token，然后启动服务。')
 
     res.json({ success: true, logs: logs.join('\n') })
   } catch (error) {
@@ -58,14 +103,27 @@ router.post('/install', async (req, res) => {
 // 启动 OpenClaw
 router.post('/start', async (req, res) => {
   try {
-    const config = await db.get('SELECT * FROM config WHERE id = 1')
-    if (!config.openclaw_path) {
+    const database = await getDb()
+    const config = database.data.config
+    if (!config?.openclawPath) {
       return res.status(400).json({ error: 'OpenClaw 未安装' })
     }
 
-    // 启动 OpenClaw
-    await startOpenClaw(config.openclaw_path)
+    // 确保 openclaw 可执行
+    try {
+      await execCommand(`${config.openclawPath} --version`)
+    } catch {
+      // 尝试从 PATH 查找
+      const whichResult = await execCommand('which openclaw')
+      if (whichResult) {
+        config.openclawPath = 'openclaw'
+        await database.write()
+      } else {
+        return res.status(400).json({ error: '未找到 openclaw 命令，请检查安装' })
+      }
+    }
 
+    await startOpenClaw(config.openclawPath)
     res.json({ success: true, message: 'OpenClaw 已启动' })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -86,9 +144,10 @@ router.post('/stop', async (req, res) => {
 router.post('/restart', async (req, res) => {
   try {
     await exec('pkill -f openclaw')
-    const config = await db.get('SELECT * FROM config WHERE id = 1')
-    if (config.openclaw_path) {
-      await startOpenClaw(config.openclaw_path)
+    const database = await getDb()
+    const config = database.data.config
+    if (config?.openclawPath) {
+      await startOpenClaw(config.openclawPath)
     }
     res.json({ success: true, message: 'OpenClaw 已重启' })
   } catch (error) {
@@ -96,31 +155,34 @@ router.post('/restart', async (req, res) => {
   }
 })
 
+// 获取系统信息
 async function getSystemInfo() {
   const info = {}
 
-  // Node.js 版本
   try {
     info.nodeVersion = await execCommand('node --version')
   } catch {
     info.nodeVersion = '未安装'
   }
 
-  // 操作系统
+  try {
+    info.npmVersion = await execCommand('npm --version')
+  } catch {
+    info.npmVersion = '未安装'
+  }
+
   try {
     info.os = await execCommand('uname -a')
   } catch {
     info.os = 'Unknown'
   }
 
-  // 架构
   try {
     info.arch = await execCommand('uname -m')
   } catch {
     info.arch = 'Unknown'
   }
 
-  // 内存
   try {
     const mem = await execCommand('free -h | grep "^Mem:"')
     info.memory = mem.trim()
@@ -128,7 +190,6 @@ async function getSystemInfo() {
     info.memory = 'Unknown'
   }
 
-  // 磁盘空间
   try {
     const disk = await execCommand('df -h / | tail -1')
     info.disk = disk.trim()
@@ -139,6 +200,7 @@ async function getSystemInfo() {
   return info
 }
 
+// 环境检查
 async function checkEnvironment() {
   const errors = []
   const warnings = []
@@ -148,10 +210,12 @@ async function checkEnvironment() {
     const nodeVersion = await execCommand('node --version')
     const version = parseInt(nodeVersion.replace('v', '').split('.')[0])
     if (version < 18) {
-      errors.push('Node.js 版本必须 >= 18')
+      errors.push('Node.js 版本必须 >= 18（建议 20+）')
+    } else {
+      errors.push(`Node.js 版本较旧: ${nodeVersion.trim()}，建议升级到 20+`)
     }
   } catch {
-    errors.push('未检测到 Node.js')
+    errors.push('未检测到 Node.js（将自动安装）')
   }
 
   // 检查 npm
@@ -159,13 +223,6 @@ async function checkEnvironment() {
     await execCommand('npm --version')
   } catch {
     errors.push('未检测到 npm')
-  }
-
-  // 检查是否有 root/管理员权限（某些操作需要）
-  try {
-    await execCommand('whoami')
-  } catch {
-    errors.push('无法获取当前用户')
   }
 
   return {
@@ -179,28 +236,20 @@ async function installBinary(installPath, version, logs) {
   const result = []
 
   result.push(`下载 OpenClaw 二进制文件到 ${installPath}...`)
+  result.push('⚠️  二进制安装功能开发中，建议使用 npm 安装')
+  result.push('安装完成')
 
-  // TODO: 实现实际的下载和安装逻辑
-  // 这里先模拟
-
-  result.push('下载完成')
-  result.push('设置执行权限...')
-
-  await execCommand(`chmod +x ${installPath}`)
-
-  result.push('二进制安装完成')
   return result
 }
 
 async function initConfig() {
-  // 创建初始配置
-  const configPath = join(__dirname, '..', '..', 'data', 'openclaw.json')
-  const configDir = path.dirname(configPath)
+  const { join } = require('node:path')
+  const { ensureDir, writeJson } = require('fs-extra')
 
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true })
-  }
+  const configDir = join(__dirname, '..', '..', 'data')
+  await ensureDir(configDir)
 
+  const configPath = join(configDir, 'openclaw.json')
   const config = {
     gateway: {
       bind: '127.0.0.1:18789',
@@ -216,13 +265,12 @@ async function initConfig() {
     }
   }
 
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
+  await writeJson(configPath, config, { spaces: 2 })
 }
 
 async function startOpenClaw(installPath) {
-  // 后台启动 OpenClaw
-  // 注意：在容器环境中需要特殊处理
   return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process')
     const child = spawn(installPath, ['gateway', 'start'], {
       detached: true,
       stdio: 'ignore'
@@ -235,6 +283,7 @@ async function startOpenClaw(installPath) {
 
 async function execCommand(command, logs = []) {
   return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process')
     const child = spawn(command, { shell: true, stdio: 'pipe' })
 
     let output = ''

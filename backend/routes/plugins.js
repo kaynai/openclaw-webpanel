@@ -1,19 +1,14 @@
 import express from 'express'
-import db from '../db.js'
+import { getDb } from '../db.js'
 
 const router = express.Router()
 
 // 获取插件列表
 router.get('/', async (req, res) => {
   try {
-    const plugins = await db.all('SELECT * FROM plugins ORDER BY installed_at DESC')
-    // 解析 JSON 字段
-    const parsed = plugins.map(p => ({
-      ...p,
-      config: p.config ? JSON.parse(p.config) : {},
-      files: p.files ? JSON.parse(p.files) : []
-    }))
-    res.json({ plugins: parsed })
+    const database = await getDb()
+    const plugins = database.data.plugins || []
+    res.json({ plugins })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
@@ -23,8 +18,8 @@ router.get('/', async (req, res) => {
 router.post('/install', async (req, res) => {
   try {
     const { source, repo, url, file } = req.body
-    // TODO: 实现实际的插件安装逻辑
-    // 这里先返回模拟数据
+    const database = await getDb()
+
     const pluginId = `plugin_${Date.now()}`
     const plugin = {
       id: pluginId,
@@ -38,15 +33,8 @@ router.post('/install', async (req, res) => {
       installedAt: new Date().toISOString()
     }
 
-    await db.run(
-      `INSERT INTO plugins (id, name, version, description, author, enabled, config, files, installed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        plugin.id, plugin.name, plugin.version, plugin.description,
-        plugin.author, plugin.enabled ? 1 : 0,
-        JSON.stringify(plugin.config), JSON.stringify(plugin.files), plugin.installedAt
-      ]
-    )
+    database.data.plugins = [...(database.data.plugins || []), plugin]
+    await database.write()
 
     res.json(plugin)
   } catch (error) {
@@ -57,7 +45,11 @@ router.post('/install', async (req, res) => {
 // 卸载插件
 router.post('/:id/uninstall', async (req, res) => {
   try {
-    await db.run('DELETE FROM plugins WHERE id = ?', [req.params.id])
+    const database = await getDb()
+    const plugins = database.data.plugins || []
+    const filtered = plugins.filter(p => p.id !== req.params.id)
+    database.data.plugins = filtered
+    await database.write()
     res.json({ success: true })
   } catch (error) {
     res.status(500).json({ error: error.message })
@@ -68,10 +60,13 @@ router.post('/:id/uninstall', async (req, res) => {
 router.post('/:id/toggle', async (req, res) => {
   try {
     const { enabled } = req.body
-    await db.run(
-      'UPDATE plugins SET enabled = ? WHERE id = ?',
-      [enabled ? 1 : 0, req.params.id]
-    )
+    const database = await getDb()
+    const plugins = database.data.plugins || []
+    const plugin = plugins.find(p => p.id === req.params.id)
+    if (plugin) {
+      plugin.enabled = enabled
+      await database.write()
+    }
     res.json({ success: true })
   } catch (error) {
     res.status(500).json({ error: error.message })
