@@ -182,7 +182,7 @@ const statusText = computed(() => {
 async function detectEnv() {
   detecting.value = true
   try {
-    const response = await fetch('/api/system/env')
+    const response = await fetch('/api/install/env')
     const data = await response.json()
     envInfo.value = data.info
     envCheck.value = data.check
